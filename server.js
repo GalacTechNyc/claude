@@ -361,7 +361,15 @@ async function serveApp(res, id) {
 async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
   if (req.method === "GET" && url.pathname === "/api/health") {
-    return sendJson(res, 200, { ok: true, model: MODEL, locked: Boolean(ACCESS_TOKEN) });
+    return sendJson(res, 200, {
+      ok: true,
+      model: MODEL,
+      locked: Boolean(ACCESS_TOKEN),
+      apiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+      workspaceId: Boolean(process.env.ANTHROPIC_WORKSPACE_ID),
+      appStorage: apps.location.startsWith("Vercel Blob") ? "blob" : apps.location === "unavailable" ? "none" : "disk",
+      version: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
+    });
   }
   if (!authorized(req)) return sendJson(res, 401, { error: "Wrong or missing access key" });
   if (req.method === "GET" && url.pathname === "/api/apps") return sendJson(res, 200, { apps: await apps.list() });
