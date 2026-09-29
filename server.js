@@ -44,7 +44,12 @@ const MAX_MESSAGES = 40;
 const MAX_CHARS = 20000;
 const MAX_TOOL_ROUNDS = 8;
 
-const client = new Anthropic();
+// Keys that aren't scoped to a workspace must name one on every request.
+const client = new Anthropic(
+  process.env.ANTHROPIC_WORKSPACE_ID
+    ? { defaultHeaders: { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID } }
+    : {},
+);
 const apps = createAppStore({ dir: APPS_DIR });
 
 const MIME = {

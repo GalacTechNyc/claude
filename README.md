@@ -67,6 +67,7 @@ You need glasses firmware v125+ and Meta AI app v272+. The key is saved on the g
 | Variable | Default | What it does |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | **Required.** Your Claude API key. |
+| `ANTHROPIC_WORKSPACE_ID` | *(none)* | Only if your API key isn't scoped to a workspace. Set it to the workspace ID from the Claude Console (**Settings → Workspaces**). |
 | `ACCESS_TOKEN` | *(none)* | Passcode the glasses must send. **Set this.** Without it, anyone who finds your URL can spend your API credits. |
 | `CLAUDE_MODEL` | `claude-opus-5` | The Claude model to use. |
 | `CLAUDE_EFFORT` | `medium` | `low` / `medium` / `high` / `xhigh` / `max`. Lower is faster and cheaper; higher writes better apps. |
