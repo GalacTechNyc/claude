@@ -117,7 +117,7 @@ textarea {
 textarea::placeholder { color: var(--dim); }
 
 .icon {
-  width: 88px;
+  width: 76px;
   cursor: pointer;
   padding: 0;
   display: flex;

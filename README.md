@@ -6,7 +6,11 @@ Claude can also **write new apps for your glasses**. Say *"make me a pomodoro ti
 
 - **Pinch the "Ask Claude…" box** to open the glasses' voice and handwriting composer. Your message is sent as soon as you finish.
 - **Swipe ↑ / ↓** to page through long answers.
-- **Swipe ← / →** to move between the ask box, 🔈 read-aloud, ▦ your apps and ＋ new chat.
+- **Swipe ← / →** to move between the ask box and the buttons:
+  - **🔈 Voice:** reads Claude's answers aloud (🔊 when on).
+  - **📍 Place:** shares your location so "near me" and "here" questions work. Your first pinch asks for permission. It uses your phone's location, and the server turns it into a neighborhood and city with OpenStreetMap.
+  - **▦ Apps:** the apps Claude has built for you.
+  - **＋ New:** starts a new chat.
 - **Back gesture** while Claude is answering stops the reply.
 
 ### Apps Claude builds
@@ -18,7 +22,7 @@ Claude can also **write new apps for your glasses**. Say *"make me a pomodoro ti
 
 **What Claude can't change:** Meta only lets outside code run as web apps, so Claude can't touch the glasses' system software, settings, firmware or Meta's built-in apps. Claude's apps can use the display, swipes and pinches, the voice/handwriting composer, text-to-speech, motion sensors, your phone's location, local storage and the internet. The camera and microphone aren't open to web apps yet.
 
-Claude knows it's on a small heads-up display, so it keeps replies short and in plain text. Your conversation is kept on the glasses between sessions until you tap ＋.
+Claude searches the web for anything current or local, like weather, news, scores, hours and places nearby, and it always knows your local time. Claude knows it's on a small heads-up display, so it keeps replies short and in plain text. Your conversation is kept on the glasses between sessions until you tap ＋.
 
 ## How it works
 

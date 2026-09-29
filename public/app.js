@@ -9,6 +9,7 @@
   const promptEl = $("prompt");
   const speakBtn = $("speak");
   const appsBtn = $("appsBtn");
+  const placeBtn = $("placeBtn");
   const resetBtn = $("reset");
   const statusEl = $("status");
   const welcomeEl = $("welcome");
@@ -40,6 +41,9 @@
   // Each message: { role, content, app?: {id, title} } — app is set when Claude saved an app that turn.
   let messages = store.get("messages", []);
   let speakAloud = store.get("speakAloud", false);
+  let shareLocation = store.get("shareLocation", false);
+  let lastPosition = null; // { lat, lon, accuracy, at }
+  let watchId = null;
   let busy = false;
   let controller = null;
   let view = "chat";
@@ -122,6 +126,73 @@
     if (!on && "speechSynthesis" in window) speechSynthesis.cancel();
   }
 
+  // --- Location ----------------------------------------------------------------
+  // The glasses only show the permission prompt after a pinch, so location starts
+  // from the Place button; afterwards a watch keeps the latest fix ready for each send.
+
+  function startWatching() {
+    if (!("geolocation" in navigator) || watchId !== null) return;
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        lastPosition = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy, at: Date.now() };
+      },
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) {
+          setPlace(false);
+          setStatus("Location blocked", "error");
+        }
+      },
+      { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 },
+    );
+  }
+
+  function stopWatching() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    lastPosition = null;
+  }
+
+  function setPlace(on) {
+    shareLocation = on;
+    store.set("shareLocation", on);
+    placeBtn.setAttribute("aria-pressed", String(on));
+    if (on) startWatching();
+    else stopWatching();
+  }
+
+  function togglePlace() {
+    if (shareLocation) {
+      setPlace(false);
+      setStatus("Location off");
+      return;
+    }
+    if (!("geolocation" in navigator)) {
+      setStatus("No location here", "error");
+      return;
+    }
+    setStatus("Finding you…", "busy");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        lastPosition = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy, at: Date.now() };
+        setPlace(true);
+        setStatus("Location on");
+      },
+      (err) => setStatus(err.code === err.PERMISSION_DENIED ? "Location blocked" : "Can't find you", "error"),
+      { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 },
+    );
+  }
+
+  // Sent with every question: local time zone always, location when shared and fresh.
+  function currentContext() {
+    const context = {};
+    try { context.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* unknown */ }
+    if (shareLocation && lastPosition && Date.now() - lastPosition.at < 10 * 60 * 1000) {
+      const { lat, lon, accuracy } = lastPosition;
+      context.location = { lat, lon, accuracy };
+    }
+    return context;
+  }
+
   function resetChat() {
     if (controller) controller.abort();
     if ("speechSynthesis" in window) speechSynthesis.cancel();
@@ -163,7 +234,7 @@
       const res = await fetch("api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({ messages: apiMessages() }),
+        body: JSON.stringify({ messages: apiMessages(), context: currentContext() }),
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -335,11 +406,12 @@
   // Text from the on-glasses composer arrives as a change event.
   promptEl.addEventListener("change", () => { if (promptEl.value.trim()) send(); });
   speakBtn.addEventListener("click", () => setSpeak(!speakAloud));
+  placeBtn.addEventListener("click", togglePlace);
   appsBtn.addEventListener("click", () => (view === "apps" ? showChat() : showApps()));
   resetBtn.addEventListener("click", () => { if (view === "apps") showChat(); resetChat(); });
   openAppBtn.addEventListener("click", () => openApp(openAppBtn.dataset.id));
 
-  const footerControls = [promptEl, speakBtn, appsBtn, resetBtn];
+  const footerControls = [promptEl, speakBtn, placeBtn, appsBtn, resetBtn];
 
   function moveFocusIn(list, delta) {
     const i = list.indexOf(document.activeElement);
@@ -410,6 +482,8 @@
 
   // --- Start -----------------------------------------------------------------
   setSpeak(speakAloud);
+  placeBtn.setAttribute("aria-pressed", String(shareLocation));
+  if (shareLocation) startWatching(); // permission was granted earlier, so no prompt
   if (params.get("view") === "apps") {
     history.replaceState(null, "", location.pathname);
     showApps();

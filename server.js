@@ -38,7 +38,12 @@ Rules for every app you write (Meta Ray-Ban Display web app platform):
 - Text entry: a focused <input type="text"> or <textarea> opens the glasses' voice/handwriting composer when pinched; read the value from input/change events.
 - Available: localStorage (persist app state there, with keys prefixed by the app name), speechSynthesis (one English voice), DeviceOrientationEvent/DeviceMotionEvent (need a user gesture to request permission), navigator.geolocation (from the phone), fetch to https APIs that allow CORS. Not available: camera, microphone, notifications.`;
 
-const SYSTEM_PROMPT = (process.env.SYSTEM_PROMPT || BASE_PROMPT) + "\n" + APP_BUILDER_PROMPT;
+const SEARCH_PROMPT = `
+Use the web_search tool for anything current, local or checkable: weather, news, scores, prices, opening hours, events, directions and places nearby. Don't guess at facts that change.
+Messages may end with a [Context from the glasses: ...] note giving the wearer's local time and, when shared, their location. Use it for "near me", "here", "now" and "today" questions; don't mention it otherwise.
+Never put URLs, source lists or citation markers in replies; just give the answer, naming a source briefly only when it matters.`;
+
+const SYSTEM_PROMPT = (process.env.SYSTEM_PROMPT || BASE_PROMPT) + "\n" + SEARCH_PROMPT + "\n" + APP_BUILDER_PROMPT;
 
 const MAX_MESSAGES = 40;
 const MAX_CHARS = 20000;
@@ -108,6 +113,87 @@ const TOOLS = [
     },
   },
 ];
+
+// Anthropic-hosted web search; runs on Anthropic's servers, no extra setup.
+function webSearchTool(place, timezone) {
+  const user_location = { type: "approximate" };
+  if (place?.city) user_location.city = place.city;
+  if (place?.region) user_location.region = place.region;
+  if (place?.country) user_location.country = place.country;
+  if (timezone) user_location.timezone = timezone;
+  return {
+    type: "web_search_20260209",
+    name: "web_search",
+    max_uses: 5,
+    ...(Object.keys(user_location).length > 1 ? { user_location } : {}),
+  };
+}
+
+// --- Where and when the wearer is -------------------------------------------
+
+const num = (v, min, max) => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
+
+function validTimezone(tz) {
+  if (typeof tz !== "string" || tz.length > 64) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return null;
+  }
+}
+
+// Coordinates -> neighborhood/city via OpenStreetMap Nominatim (free, light use only).
+const placeCache = new Map();
+async function reverseGeocode(lat, lon) {
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  if (placeCache.has(key)) return placeCache.get(key);
+  let place = null;
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&addressdetails=1&lat=${lat}&lon=${lon}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "claude-display/1.0 (personal Meta Ray-Ban Display app)", "Accept-Language": "en" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.ok) {
+      const a = (await res.json()).address || {};
+      place = {
+        area: a.neighbourhood || a.suburb || a.quarter || a.city_district || a.borough || "",
+        street: a.road || "",
+        city: a.city || a.town || a.village || a.hamlet || a.county || "",
+        region: a.state || "",
+        country: (a.country_code || "").toUpperCase(),
+      };
+    }
+  } catch (err) {
+    console.warn("Reverse geocoding failed:", err.message);
+  }
+  if (placeCache.size > 500) placeCache.clear();
+  placeCache.set(key, place);
+  return place;
+}
+
+// Builds the context note appended to the latest user message, plus the place for web search.
+async function buildContext(raw) {
+  if (!raw || typeof raw !== "object") return { note: "", place: null, timezone: null };
+  const timezone = validTimezone(raw.timezone);
+  const parts = [];
+  if (timezone) {
+    const now = new Date().toLocaleString("en-US", {
+      timeZone: timezone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+    parts.push(`local time ${now} (${timezone})`);
+  }
+  let place = null;
+  const loc = raw.location;
+  if (loc && num(loc.lat, -90, 90) && num(loc.lon, -180, 180)) {
+    place = await reverseGeocode(loc.lat, loc.lon);
+    const name = place ? [place.street, place.area, place.city, place.region, place.country].filter(Boolean).join(", ") : "";
+    const accuracy = num(loc.accuracy, 0, 1e6) ? `, ±${Math.round(loc.accuracy)} m` : "";
+    parts.push(`location ${name ? name + " " : ""}(${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}${accuracy})`);
+  }
+  return { note: parts.length ? `\n\n[Context from the glasses: ${parts.join("; ")}]` : "", place, timezone };
+}
 
 const isStr = (v) => typeof v === "string" && v.trim() !== "";
 
@@ -220,12 +306,22 @@ async function handleChat(req, res) {
   if (!authorized(req)) return sendJson(res, 401, { error: "Wrong or missing access key" });
 
   let messages;
+  let rawContext;
   try {
-    messages = sanitizeMessages(JSON.parse(await readBody(req)).messages);
+    const body = JSON.parse(await readBody(req));
+    messages = sanitizeMessages(body.messages);
+    rawContext = body.context;
   } catch {
     return sendJson(res, 400, { error: "Invalid request" });
   }
   if (!messages) return sendJson(res, 400, { error: "Invalid conversation" });
+
+  const context = await buildContext(rawContext);
+  if (context.note) {
+    const last = messages.at(-1);
+    messages[messages.length - 1] = { ...last, content: last.content + context.note };
+  }
+  const tools = [...TOOLS, webSearchTool(context.place, context.timezone)];
 
   res.writeHead(200, {
     "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -254,7 +350,7 @@ async function handleChat(req, res) {
         system: SYSTEM_PROMPT,
         thinking: { type: "adaptive" },
         output_config: { effort: EFFORT },
-        tools: TOOLS,
+        tools,
         // If a safety classifier declines, retry server-side on Anthropic's recommended model.
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
@@ -266,7 +362,9 @@ async function handleChat(req, res) {
         let toolBytes = 0;
         let lastReport = 0;
         for await (const event of current) {
-          if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
+          if (event.type === "content_block_start" && event.content_block.type === "server_tool_use") {
+            emit({ type: "status", text: "Searching the web…" });
+          } else if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
             const name = event.content_block.name;
             toolBytes = 0;
             emit({ type: "status", text: name === "save_app" ? "Writing code…" : name === "read_app" ? "Reading app…" : "Working…" });
@@ -296,6 +394,13 @@ async function handleChat(req, res) {
       if (final.stop_reason === "refusal") {
         emit({ type: "error", error: "Claude declined to answer that one." });
         return res.end();
+      }
+
+      // Server-side tools (web search) hit their per-turn step limit: send the turn back
+      // unchanged and the API resumes where it left off.
+      if (final.stop_reason === "pause_turn") {
+        messages = [...messages, { role: "assistant", content: final.content }];
+        continue;
       }
 
       const toolUses = final.content.filter((b) => b.type === "tool_use");
