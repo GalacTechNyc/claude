@@ -319,13 +319,21 @@ async function handleChat(req, res) {
   } catch (err) {
     if (res.destroyed) return;
     let message = "Something went wrong. Try again.";
-    if (err instanceof Anthropic.AuthenticationError) message = "Server API key is invalid.";
+    if (!process.env.ANTHROPIC_API_KEY) message = "ANTHROPIC_API_KEY isn't set on the server.";
+    else if (err instanceof Anthropic.AuthenticationError) message = "Server API key is invalid.";
+    else if (err instanceof Anthropic.PermissionDeniedError) message = `API key lacks access: ${apiErrorText(err)}`;
     else if (err instanceof Anthropic.RateLimitError) message = "Rate limited. Wait a moment.";
     else if (err instanceof Anthropic.APIConnectionError) message = "Can't reach Claude right now.";
+    else if (err instanceof Anthropic.APIError) message = `Claude API error ${err.status ?? ""}: ${apiErrorText(err)}`;
     console.error("Claude API error:", err);
     emit({ type: "error", error: message });
   }
   res.end();
+}
+
+// The API's own error message (never includes the key), trimmed for the small display.
+function apiErrorText(err) {
+  return String(err.error?.error?.message || err.message || "unknown error").slice(0, 200);
 }
 
 // --- Apps --------------------------------------------------------------------
