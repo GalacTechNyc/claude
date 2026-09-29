@@ -369,6 +369,8 @@ async function handleApi(req, res, url) {
       workspaceId: Boolean(process.env.ANTHROPIC_WORKSPACE_ID),
       appStorage: apps.location.startsWith("Vercel Blob") ? "blob" : apps.location === "unavailable" ? "none" : "disk",
       version: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
+      deployment: process.env.VERCEL_DEPLOYMENT_ID || "local",
+      environment: process.env.VERCEL_ENV || "local",
     });
   }
   if (!authorized(req)) return sendJson(res, 401, { error: "Wrong or missing access key" });
