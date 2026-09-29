@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
-import { createAppStore, MAX_APP_BYTES } from "./apps.js";
+import { createAppStore, blobEnvNames, MAX_APP_BYTES } from "./apps.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, "public");
@@ -368,6 +368,7 @@ async function handleApi(req, res, url) {
       apiKey: Boolean(process.env.ANTHROPIC_API_KEY),
       workspaceId: Boolean(process.env.ANTHROPIC_WORKSPACE_ID),
       appStorage: apps.location.startsWith("Vercel Blob") ? "blob" : apps.location === "unavailable" ? "none" : "disk",
+      blobEnv: blobEnvNames(), // names only, never values
       version: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
       deployment: process.env.VERCEL_DEPLOYMENT_ID || "local",
       environment: process.env.VERCEL_ENV || "local",
