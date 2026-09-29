@@ -118,7 +118,7 @@
     speakAloud = on;
     store.set("speakAloud", on);
     speakBtn.setAttribute("aria-pressed", String(on));
-    speakBtn.textContent = on ? "🔊" : "🔈";
+    speakBtn.querySelector(".ico").textContent = on ? "🔊" : "🔈";
     if (!on && "speechSynthesis" in window) speechSynthesis.cancel();
   }
 

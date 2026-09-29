@@ -1,6 +1,6 @@
 // Network-first for the app shell so updates show up immediately, with a
 // cached copy for when the connection drops. API calls are never cached.
-const CACHE = "claude-display-v2";
+const CACHE = "claude-display-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js"];
 
 self.addEventListener("install", (e) => {
