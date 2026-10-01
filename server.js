@@ -1,6 +1,7 @@
 // Claude for Meta Ray-Ban Display — tiny server that serves the glasses web app,
 // proxies chat to the Claude API (the API key never leaves the server), and hosts
-// the mini web apps Claude writes for the glasses.
+// the mini web apps Claude writes for the glasses. It can also run on Meta's Muse
+// Spark instead: Meta Model API speaks the same Messages format as the Claude API.
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -13,12 +14,21 @@ const publicDir = path.join(here, "public");
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
-const MODEL = process.env.CLAUDE_MODEL || "claude-opus-5";
-const EFFORT = process.env.CLAUDE_EFFORT || "medium";
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || "";
 const APPS_DIR = path.resolve(here, process.env.APPS_DIR || "data/apps");
 
-const BASE_PROMPT = `You are Claude, answering on the heads-up display of Meta Ray-Ban Display smart glasses.
+// Which AI answers: "claude" (Claude API) or "muse" (Muse Spark on Meta Model API).
+// With only a Meta key set, Muse is picked automatically.
+const PROVIDER = (
+  process.env.AI_PROVIDER || (process.env.MODEL_API_KEY && !process.env.ANTHROPIC_API_KEY ? "muse" : "claude")
+).toLowerCase();
+const MUSE = PROVIDER === "muse";
+const NAME = MUSE ? "Muse" : "Claude";
+const API_KEY_VAR = MUSE ? "MODEL_API_KEY" : "ANTHROPIC_API_KEY";
+const MODEL = MUSE ? process.env.MUSE_MODEL || "muse-spark-1.3" : process.env.CLAUDE_MODEL || "claude-opus-5";
+const EFFORT = (MUSE ? process.env.MUSE_EFFORT : process.env.CLAUDE_EFFORT) || "medium";
+
+const BASE_PROMPT = `You are ${NAME}, answering on the heads-up display of Meta Ray-Ban Display smart glasses.
 The screen is a small 600x600 square and the wearer is often walking or doing something else.
 - Lead with the answer. Keep replies short: usually 1-4 sentences, under 80 words unless asked for more.
 - Plain text only. No markdown headings, tables, code fences or bold markers. Short "- " bullet lists are fine.
@@ -34,7 +44,7 @@ Rules for every app you write (Meta Ray-Ban Display web app platform):
 - Fixed 600x600 layout: html, body { width:600px; height:600px; margin:0; overflow:hidden; }. Nothing may need page scrolling; paginate or scroll inner elements with the arrow keys instead.
 - Additive see-through display: pure black (#000) is transparent. Use a black background, bright high-contrast text and accents, text at least 24px, no large bright filled areas.
 - Input is only keyboard events: ArrowUp/ArrowDown/ArrowLeft/ArrowRight (swipes) and Enter (pinch). There is no mouse, touch or physical keyboard. Every control must be focusable (button or tabindex="0"), at least 88px tall, with a bright visible :focus style. Implement arrow-key focus movement yourself and focus a sensible control on load.
-- Escape is reserved: it returns the wearer to Claude. Do not handle or preventDefault Escape.
+- Escape is reserved: it returns the wearer to ${NAME}. Do not handle or preventDefault Escape.
 - Text entry: a focused <input type="text"> or <textarea> opens the glasses' voice/handwriting composer when pinched; read the value from input/change events.
 - Available: localStorage (persist app state there, with keys prefixed by the app name), speechSynthesis (one English voice), DeviceOrientationEvent/DeviceMotionEvent (need a user gesture to request permission), navigator.geolocation (from the phone), fetch to https APIs that allow CORS. Not available: camera, microphone, notifications.`;
 
@@ -49,12 +59,19 @@ const MAX_MESSAGES = 40;
 const MAX_CHARS = 20000;
 const MAX_TOOL_ROUNDS = 8;
 
-// Keys that aren't scoped to a workspace must name one on every request.
-const client = new Anthropic(
-  process.env.ANTHROPIC_WORKSPACE_ID
-    ? { defaultHeaders: { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID } }
-    : {},
-);
+const client = MUSE
+  ? // Meta Model API takes the Anthropic SDK as-is: its own host, and the key sent as a bearer token.
+    new Anthropic({
+      baseURL: process.env.MUSE_BASE_URL || "https://api.meta.ai",
+      apiKey: null,
+      authToken: process.env.MODEL_API_KEY || null,
+    })
+  : // Keys that aren't scoped to a workspace must name one on every request.
+    new Anthropic(
+      process.env.ANTHROPIC_WORKSPACE_ID
+        ? { defaultHeaders: { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID } }
+        : {},
+    );
 const apps = createAppStore({ dir: APPS_DIR });
 
 const MIME = {
@@ -114,19 +131,31 @@ const TOOLS = [
   },
 ];
 
-// Anthropic-hosted web search; runs on Anthropic's servers, no extra setup.
+// Meta's docs don't pin down the type string its Messages endpoint wants for hosted
+// web search, so try Anthropic's, then the bare name, then go on without search.
+// Remembered across requests once a type is accepted.
+const MUSE_SEARCH_TYPES = ["web_search_20250305", "web_search"];
+const museSearch = { index: 0, confirmed: false };
+
+// Hosted web search; runs on Anthropic's (or Meta's) servers, no extra setup.
 function webSearchTool(place, timezone) {
   const user_location = { type: "approximate" };
   if (place?.city) user_location.city = place.city;
   if (place?.region) user_location.region = place.region;
   if (place?.country) user_location.country = place.country;
   if (timezone) user_location.timezone = timezone;
-  return {
-    type: "web_search_20260209",
-    name: "web_search",
-    max_uses: 5,
-    ...(Object.keys(user_location).length > 1 ? { user_location } : {}),
-  };
+  const location = Object.keys(user_location).length > 1 ? { user_location } : {};
+  // Meta Model API rejects max_uses.
+  if (MUSE) return { type: MUSE_SEARCH_TYPES[museSearch.index], name: "web_search", ...location };
+  return { type: "web_search_20260209", name: "web_search", max_uses: 5, ...location };
+}
+
+// Meta Model API rejects fields it doesn't know, such as eager_input_streaming.
+const APP_TOOLS = MUSE ? TOOLS.map(({ eager_input_streaming, ...tool }) => tool) : TOOLS;
+
+function toolsFor(context) {
+  if (MUSE && museSearch.index >= MUSE_SEARCH_TYPES.length) return APP_TOOLS;
+  return [...APP_TOOLS, webSearchTool(context.place, context.timezone)];
 }
 
 // --- Where and when the wearer is -------------------------------------------
@@ -321,7 +350,7 @@ async function handleChat(req, res) {
     const last = messages.at(-1);
     messages[messages.length - 1] = { ...last, content: last.content + context.note };
   }
-  const tools = [...TOOLS, webSearchTool(context.place, context.timezone)];
+  let tools = toolsFor(context);
 
   res.writeHead(200, {
     "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -344,18 +373,19 @@ async function handleChat(req, res) {
     let parseRetries = 0;
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       emit({ type: "round" });
-      current =client.beta.messages.stream({
+      const request = {
         model: MODEL,
         max_tokens: 32000,
         system: SYSTEM_PROMPT,
         thinking: { type: "adaptive" },
         output_config: { effort: EFFORT },
         tools,
-        // If a safety classifier declines, retry server-side on Anthropic's recommended model.
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
         messages,
-      });
+      };
+      current = MUSE
+        ? client.messages.stream(request)
+        : // If a safety classifier declines, retry server-side on Anthropic's recommended model.
+          client.beta.messages.stream({ ...request, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" });
 
       let final;
       try {
@@ -380,7 +410,22 @@ async function handleChat(req, res) {
           }
         }
         final = await current.finalMessage();
+        if (MUSE) museSearch.confirmed = true;
       } catch (err) {
+        // Meta Model API turned down this web search tool type: try the next one, or none.
+        if (
+          MUSE &&
+          !museSearch.confirmed &&
+          museSearch.index < MUSE_SEARCH_TYPES.length &&
+          err instanceof Anthropic.BadRequestError &&
+          /web_search|tool/i.test(apiErrorText(err))
+        ) {
+          console.warn(`Meta Model API rejected web search type ${MUSE_SEARCH_TYPES[museSearch.index]}:`, apiErrorText(err));
+          museSearch.index++;
+          tools = toolsFor(context);
+          round--;
+          continue;
+        }
         // With eager input streaming the SDK can fail to parse a tool input it
         // cannot repair. Re-issue the same request a couple of times; rethrow API errors.
         if (err instanceof Anthropic.APIError || res.destroyed || parseRetries >= 2) throw err;
@@ -392,7 +437,7 @@ async function handleChat(req, res) {
       }
 
       if (final.stop_reason === "refusal") {
-        emit({ type: "error", error: "Claude declined to answer that one." });
+        emit({ type: "error", error: `${NAME} declined to answer that one.` });
         return res.end();
       }
 
@@ -429,13 +474,13 @@ async function handleChat(req, res) {
   } catch (err) {
     if (res.destroyed) return;
     let message = "Something went wrong. Try again.";
-    if (!process.env.ANTHROPIC_API_KEY) message = "ANTHROPIC_API_KEY isn't set on the server.";
+    if (!process.env[API_KEY_VAR]) message = `${API_KEY_VAR} isn't set on the server.`;
     else if (err instanceof Anthropic.AuthenticationError) message = "Server API key is invalid.";
     else if (err instanceof Anthropic.PermissionDeniedError) message = `API key lacks access: ${apiErrorText(err)}`;
     else if (err instanceof Anthropic.RateLimitError) message = "Rate limited. Wait a moment.";
-    else if (err instanceof Anthropic.APIConnectionError) message = "Can't reach Claude right now.";
-    else if (err instanceof Anthropic.APIError) message = `Claude API error ${err.status ?? ""}: ${apiErrorText(err)}`;
-    console.error("Claude API error:", err);
+    else if (err instanceof Anthropic.APIConnectionError) message = `Can't reach ${NAME} right now.`;
+    else if (err instanceof Anthropic.APIError) message = `${NAME} API error ${err.status ?? ""}: ${apiErrorText(err)}`;
+    console.error(`${NAME} API error:`, err);
     emit({ type: "error", error: message });
   }
   res.end();
@@ -468,10 +513,12 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") {
     return sendJson(res, 200, {
       ok: true,
+      provider: MUSE ? "muse" : "claude",
       model: MODEL,
       locked: Boolean(ACCESS_TOKEN),
-      apiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+      apiKey: Boolean(process.env[API_KEY_VAR]),
       workspaceId: Boolean(process.env.ANTHROPIC_WORKSPACE_ID),
+      ...(MUSE ? { webSearch: MUSE_SEARCH_TYPES[museSearch.index] || "off" } : {}),
       appStorage: apps.location.startsWith("Vercel Blob") ? "blob" : apps.location === "unavailable" ? "none" : "disk",
       blobEnv: blobEnvNames(), // names only, never values
       version: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
@@ -493,6 +540,14 @@ async function handleApi(req, res, url) {
   sendJson(res, 404, { error: "Not found" });
 }
 
+// The page is written for Claude; when running as Muse, rename it and swap the accent color.
+function museBranding(html) {
+  return html
+    .replaceAll("Claude", NAME)
+    .replace("✳", "✦")
+    .replace("</head>", "<style>:root { --accent: #8fb4ff; }</style>\n</head>");
+}
+
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
@@ -502,7 +557,8 @@ async function serveStatic(req, res, url) {
     return;
   }
   try {
-    const data = await readFile(filePath);
+    let data = await readFile(filePath);
+    if (MUSE && pathname === "/index.html") data = museBranding(data.toString("utf8"));
     res.writeHead(200, {
       "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
       "Cache-Control": "no-cache",
@@ -528,10 +584,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Claude for Meta Ray-Ban Display on http://${HOST}:${PORT} (model: ${MODEL})`);
+  console.log(`${NAME} for Meta Ray-Ban Display on http://${HOST}:${PORT} (model: ${MODEL})`);
   console.log(`Apps are stored in ${apps.location}`);
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn("Warning: ANTHROPIC_API_KEY is not set — chat requests will fail.");
+  if (!process.env[API_KEY_VAR]) {
+    console.warn(`Warning: ${API_KEY_VAR} is not set — chat requests will fail.`);
   }
   if (!ACCESS_TOKEN) {
     console.warn("Warning: ACCESS_TOKEN is not set — anyone with the URL can use your API key.");

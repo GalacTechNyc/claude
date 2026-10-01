@@ -24,6 +24,8 @@ Claude can also **write new apps for your glasses**. Say *"make me a pomodoro ti
 
 Claude searches the web for anything current or local, like weather, news, scores, hours and places nearby, and it always knows your local time. Claude knows it's on a small heads-up display, so it keeps replies short and in plain text. Your conversation is kept on the glasses between sessions until you tap ＋.
 
+**Want Muse instead?** The same app runs on Meta's Muse Spark. See [Run it on Muse](#run-it-on-muse-metas-ai).
+
 ## How it works
 
 ```
@@ -75,6 +77,10 @@ You need glasses firmware v125+ and Meta AI app v272+. The key is saved on the g
 | `ACCESS_TOKEN` | *(none)* | Passcode the glasses must send. **Set this.** Without it, anyone who finds your URL can spend your API credits. |
 | `CLAUDE_MODEL` | `claude-opus-5` | The Claude model to use. |
 | `CLAUDE_EFFORT` | `medium` | `low` / `medium` / `high` / `xhigh` / `max`. Lower is faster and cheaper; higher writes better apps. |
+| `MODEL_API_KEY` | *(none)* | Your Meta Model API key, to run on Muse. See [Run it on Muse](#run-it-on-muse-metas-ai). |
+| `AI_PROVIDER` | auto | `claude` or `muse`. Only needed if both keys are set; with just `MODEL_API_KEY`, it's Muse. |
+| `MUSE_MODEL` | `muse-spark-1.3` | The Muse model to use. |
+| `MUSE_EFFORT` | `medium` | Same levels as `CLAUDE_EFFORT`. |
 | `BLOB_READ_WRITE_TOKEN` | *(none)* | Set automatically when you connect a Vercel Blob store. Apps are then saved there. |
 | `BLOB_ACCESS` | `private` | Match your Blob store's access type (`private` or `public`). |
 | `APPS_DIR` | `data/apps` | Where apps are saved when there's no Blob store (local or other hosts). |
@@ -82,6 +88,29 @@ You need glasses firmware v125+ and Meta AI app v272+. The key is saved on the g
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | Where the server listens locally. Vercel ignores these. |
 
 If Claude's safety filter declines a request, the server automatically retries it on Anthropic's recommended fallback model (`fallbacks: "default"`).
+
+## Run it on Muse (Meta's AI)
+
+The same app can run on **Muse Spark**, Meta's own model. Meta Model API accepts the same request format as the Claude API, so everything works the same way: answers on the display, voice, location, web search and building apps. On the glasses it's called **Muse**.
+
+Deploy it as a **second Vercel project** so your Claude app keeps working, and you get two apps on your glasses.
+
+1. **Get a key** at https://dev.meta.ai (**API keys**). The API is in public preview for US developers.
+2. **Import this repo again** at https://vercel.com/new and give the project a different name, e.g. `muse`.
+3. **Add environment variables:**
+   - `MODEL_API_KEY`: your Meta key. Don't add `ANTHROPIC_API_KEY` to this project.
+   - `ACCESS_TOKEN`: a long random passcode (it can differ from your Claude one).
+4. **Deploy**, then connect a **Blob** store and **redeploy**, just like steps 4–5 above.
+5. **On the glasses:** in the Meta AI app, add another web app named `Muse` with `https://YOUR-MUSE-URL/?key=YOUR_ACCESS_TOKEN`.
+
+Check `https://YOUR-MUSE-URL/api/health`: it should say `"provider":"muse"`.
+
+**Differences from Claude:**
+- Price: about $1.25 per million input tokens and $4.25 per million output tokens, plus $2.50 per 1,000 web searches. `MUSE_MODEL=muse-spark-1.3-contributor` is far cheaper, but Meta may train on your chats.
+- Web search: Meta's docs don't say exactly which tool name its Claude-style endpoint expects, so the server tries both names and keeps working without search if neither is accepted. `/api/health` shows which one is in use (`"webSearch"`).
+- There's no automatic retry on another model when Muse declines a request.
+
+Your glasses' built-in Meta AI (*"Hey Meta"*) also runs on Muse Spark since the v127 update, and that one can use the camera. This app adds the things Meta AI can't do: building your own glasses apps, your own instructions, and your choice of model and effort.
 
 ## Run locally / test without glasses
 
