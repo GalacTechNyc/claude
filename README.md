@@ -4,7 +4,7 @@ A web app that puts Claude on your **Meta Ray-Ban Display** glasses. Pinch to sp
 
 Claude can also **write new apps for your glasses**. Say *"make me a pomodoro timer"* and Claude writes the code, saves it and shows an **▶ Open** button. Then say *"make the numbers bigger"* and Claude reads its own code and updates the app.
 
-- **Pinch the "Ask Claude…" box** to open the glasses' voice and handwriting composer. Your message is sent as soon as you finish.
+- **Pinch the "Ask Claude…" box** to open the glasses' composer: speak, handwrite, or swipe down for the on-screen keyboard (glasses software v129+). Your message is sent as soon as you finish.
 - **Swipe ↑ / ↓** to page through long answers.
 - **Swipe ← / →** to move between the ask box and the buttons:
   - **🔈 Voice:** reads Claude's answers aloud (🔊 when on).
@@ -19,6 +19,18 @@ Claude can also **write new apps for your glasses**. Say *"make me a pomodoro ti
 - Ask for changes in plain words (*"add a reset button"*, *"make it green"*). Claude edits the app it just built, or the one you name.
 - **▦ Your apps** lists everything Claude has built. Pinch one to open it. Swipe → then pinch twice on ✕ to delete it.
 - Inside an app, the **back gesture** returns you to your app list.
+
+### "Hey Meta" can run Claude
+
+When Meta AI can use web apps on your glasses (see below), you can talk to it while Claude is open:
+
+- *"Hey Meta, ask Claude what's open near me"* or *"ask Claude to make me a pomodoro timer"*: Meta AI hands the request to Claude, and Claude's answer appears on the display as usual.
+- *"Hey Meta, open my pomodoro timer"*: opens one of your apps by name. *"Hey Meta, what apps do I have?"* shows your app list.
+- *"Hey Meta, start a new chat"*: same as ＋.
+
+Apps Claude builds come with their own voice actions too, so inside a counter you can say *"Hey Meta, add five"* or *"reset it"*. Apps built before this feature don't have them; ask Claude to "add voice control" to one.
+
+This uses **WebMCP**, which Meta is rolling out. It's on when your glasses are in Developer Mode (which you need for web apps anyway) or part of Meta's rollout. If it doesn't respond, restart the glasses and the Meta AI app. Everything still works by hand without it.
 
 **What Claude can't change:** Meta only lets outside code run as web apps, so Claude can't touch the glasses' system software, settings, firmware or Meta's built-in apps. Claude's apps can use the display, swipes and pinches, the voice/handwriting composer, text-to-speech, motion sensors, your phone's location, local storage and the internet. The camera and microphone aren't open to web apps yet.
 
